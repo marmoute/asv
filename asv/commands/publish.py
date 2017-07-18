@@ -192,6 +192,10 @@ class Publish(Command):
                         # Create graph
                         graph = graphs.get_graph(key, cur_params)
                         graph.add_data_point(revisions[results.commit_hash], result)
+                    else:
+                        msg = "Couldn't find %s in %s branches"
+                        log.warn(msg % (results.commit_hash, branches.keys()))
+
 
             # Get the parameter sets for all graphs
             graph_param_list = []
