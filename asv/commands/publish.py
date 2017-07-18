@@ -171,10 +171,15 @@ class Publish(Command):
 
                     benchmark_names.add(key)
 
+                    missingbranch = True
+
                     for branch in [
                         branch for branch, commits in branches.items()
                         if results.commit_hash in commits
                     ]:
+
+                        missingbranch = False
+
                         cur_params = dict(results.params)
                         cur_params['branch'] = repo.get_branch_name(branch)
 
@@ -192,9 +197,11 @@ class Publish(Command):
                         # Create graph
                         graph = graphs.get_graph(key, cur_params)
                         graph.add_data_point(revisions[results.commit_hash], result)
-                    else:
-                        msg = "Couldn't find %s in %s branches"
-                        log.warn(msg % (results.commit_hash, branches.keys()))
+
+                # Print a warning message if we couldn't find the branch of a commit
+                if missingbranch == True:
+                    msg = "Couldn't find %s in %s branches"
+                    log.warn(msg % (results.commit_hash, branches.keys()))
 
 
             # Get the parameter sets for all graphs
