@@ -137,8 +137,7 @@ class Hg(Repo):
 
     def get_hashes_from_range(self, range_spec):
         range_spec = self._encode("sort({0}, -rev)".format(range_spec))
-        return [self._decode(rev.node) for rev in self._repo.log(range_spec,
-                                                                 followfirst=True)]
+        return [self._decode(rev.node) for rev in self._repo.log(range_spec)]
 
     def get_hash_from_name(self, name):
         if name is None:
@@ -158,7 +157,7 @@ class Hg(Repo):
         return self.get_date(name)
 
     def get_branch_commits(self, branch):
-        return self.get_hashes_from_range("ancestors({0})".format(self.get_branch_name(branch)))
+        return self.get_hashes_from_range("branch({0})".format(self.get_branch_name(branch)))
 
     def get_revisions(self, commits):
         revisions = {}
