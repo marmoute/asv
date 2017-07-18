@@ -7,6 +7,8 @@ from distutils.version import LooseVersion
 import sys
 import re
 import os
+import os.path
+import subprocess
 
 import six
 
@@ -173,6 +175,13 @@ class Virtualenv(environment.Environment):
 
     def install(self, package):
         log.info("Installing into {0}".format(self.name))
+
+        if os.path.isdir(package):
+            self.run_executable('python', ['setup.py', 'install'],
+                                timeout=self._install_timeout,
+                                cwd=package)
+            return
+
         self._run_pip(['install', package], timeout=self._install_timeout)
 
     def uninstall(self, package):
