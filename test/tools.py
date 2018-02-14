@@ -14,10 +14,10 @@ import threading
 import time
 import six
 import tempfile
+import textwrap
 import sys
 from os.path import abspath, join, dirname, relpath, isdir
 from contextlib import contextmanager
-from distutils.spawn import find_executable
 from hashlib import sha256
 from six.moves import SimpleHTTPServer
 
@@ -38,22 +38,10 @@ from asv.results import Results
 
 try:
     import selenium
-    from selenium import webdriver
-    from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
-    from selenium.webdriver.support.ui import WebDriverWait
     from selenium.common.exceptions import TimeoutException
     HAVE_WEBDRIVER = True
 except ImportError:
     HAVE_WEBDRIVER = False
-
-CHROMEDRIVER = [
-    'chromedriver',
-    '/usr/lib/chromium-browser/chromedriver'   # location on Ubuntu
-]
-
-PHANTOMJS = ['phantomjs']
-
-FIREFOX = ['firefox']
 
 
 def run_asv(*argv):
@@ -245,7 +233,7 @@ def copy_template(src, dst, dvcs, values):
 
 
 def generate_test_repo(tmpdir, values=[0], dvcs_type='git',
-                       extra_branches=()):
+                       extra_branches=(), subdir=''):
     """
     Generate a test repository
 
@@ -262,6 +250,9 @@ def generate_test_repo(tmpdir, values=[0], dvcs_type='git',
         For branch start commits, use relative references, e.g.,
         the format 'master~10' or 'default~10' works both for Hg
         and Git.
+    subdir
+        A relative subdirectory inside the repository to copy the
+        test project into.
 
     Returns
     -------
@@ -283,13 +274,17 @@ def generate_test_repo(tmpdir, values=[0], dvcs_type='git',
     dvcs = dvcs_cls(dvcs_path)
     dvcs.init()
 
+    project_path = os.path.join(dvcs_path, subdir)
+    if not os.path.exists(project_path):
+        os.makedirs(project_path)
+
     for i, value in enumerate(values):
         mapping = {
             'version': i,
             'dummy_value': value
         }
 
-        copy_template(template_path, dvcs_path, dvcs, mapping)
+        copy_template(template_path, project_path, dvcs, mapping)
 
         dvcs.commit("Revision {0}".format(i))
         dvcs.tag(i)
@@ -302,7 +297,7 @@ def generate_test_repo(tmpdir, values=[0], dvcs_type='git',
                     'version': "{0}".format(i),
                     'dummy_value': value
                 }
-                copy_template(template_path, dvcs_path, dvcs, mapping)
+                copy_template(template_path, project_path, dvcs, mapping)
                 dvcs.commit("Revision {0}.{1}".format(branch_name, i))
 
     return dvcs
@@ -372,6 +367,7 @@ def generate_result_dir(tmpdir, dvcs, values, branches=None):
     benchmark_version = sha256(os.urandom(16)).hexdigest()
 
     params = None
+    param_names = None
     for commit, value in values.items():
         if isinstance(value, dict):
             params = value["params"]
@@ -389,11 +385,14 @@ def generate_result_dir(tmpdir, dvcs, values, branches=None):
         result.add_result("time_func", value, benchmark_version)
         result.save(result_dir)
 
+    if params:
+        param_names = ["param{}".format(k) for k in range(len(params))]
+
     util.write_json(join(result_dir, "benchmarks.json"), {
         "time_func": {
             "name": "time_func",
             "params": params or [],
-            "param_names": params or [],
+            "param_names": param_names or [],
             "version": benchmark_version,
         }
     }, api_version=1)
@@ -405,47 +404,38 @@ def browser(request, pytestconfig):
     """
     Fixture for Selenium WebDriver browser interface
     """
-    if not HAVE_WEBDRIVER:
-        pytest.skip("Selenium WebDriver Python bindings not found")
-
     driver_str = pytestconfig.getoption('webdriver')
-    driver_options_str = pytestconfig.getoption('webdriver_options')
+
+    if driver_str == "None":
+        pytest.skip("No webdriver selected for tests (use --webdriver).")
 
     # Evaluate the options
+    def FirefoxHeadless():
+        from selenium.webdriver.firefox.options import Options
+        options = Options()
+        options.add_argument("-headless")
+        return selenium.webdriver.Firefox(firefox_options=options)
+
+    def ChromeHeadless():
+        options = selenium.webdriver.ChromeOptions()
+        options.add_argument('headless')
+        return selenium.webdriver.Chrome(chrome_options=options)
+
     ns = {}
     six.exec_("import selenium.webdriver", ns)
     six.exec_("from selenium.webdriver import *", ns)
-    driver_options = eval(driver_options_str, ns)
-    driver_cls = getattr(webdriver, driver_str)
+    ns['FirefoxHeadless'] = FirefoxHeadless
+    ns['ChromeHeadless'] = ChromeHeadless
 
-    # Find the executable (if applicable)
-    paths = []
-    if driver_cls is webdriver.Chrome:
-        paths += CHROMEDRIVER
-        exe_kw = 'executable_path'
-    elif driver_cls is webdriver.PhantomJS:
-        paths += PHANTOMJS
-        exe_kw = 'executable_path'
-    elif driver_cls is webdriver.Firefox:
-        paths += FIREFOX
-        exe_kw = 'firefox_binary'
-    else:
-        exe_kw = None
-
-    for exe in paths:
-        if exe is None:
-            continue
-        exe = find_executable(exe)
-        if exe:
-            break
-    else:
-        exe = None
-
-    if exe is not None and exe_kw is not None and exe_kw not in driver_options:
-        driver_options[exe_kw] = exe
+    create_driver = ns.get(driver_str, None)
+    if create_driver is None:
+        src = "def create_driver():\n"
+        src += textwrap.indent(driver_str, "    ")
+        six.exec_(src, ns)
+        create_driver = ns['create_driver']
 
     # Create the browser
-    browser = driver_cls(**driver_options)
+    browser = create_driver()
 
     # Set timeouts
     browser.set_page_load_timeout(10)
