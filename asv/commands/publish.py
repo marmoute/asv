@@ -198,10 +198,10 @@ class Publish(Command):
                         graph = graphs.get_graph(key, cur_params)
                         graph.add_data_point(revisions[results.commit_hash], result)
 
-                # Print a warning message if we couldn't find the branch of a commit
-                if missingbranch == True:
-                    msg = "Couldn't find %s in %s branches"
-                    log.warn(msg % (results.commit_hash, branches.keys()))
+                    # Print a warning message if we couldn't find the branch of a commit
+                    if missingbranch == True:
+                        msg = "Couldn't find %s in %s branches"
+                        log.warn(msg % (results.commit_hash, branches.keys()))
 
 
             # Get the parameter sets for all graphs
