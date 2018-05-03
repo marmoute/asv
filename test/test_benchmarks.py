@@ -65,7 +65,7 @@ def test_find_benchmarks(tmpdir):
 
     b = benchmarks.Benchmarks.discover(conf, repo, envs, [commit_hash],
                                        regex='example')
-    assert len(b) == 25
+    assert len(b) == 26
 
     b = benchmarks.Benchmarks.discover(conf, repo, envs, [commit_hash],
                               regex='time_example_benchmark_1')
@@ -83,8 +83,22 @@ def test_find_benchmarks(tmpdir):
     assert b['custom.time_function']['pretty_name'] == 'My Custom Function'
     assert b['named.track_custom_pretty_name']['pretty_name'] == 'this.is/the.answer'
 
+    # benchmark param selection with regex
+    b = benchmarks.Benchmarks.discover(conf, repo, envs, [commit_hash],
+                                       regex='track_param_selection\(.*, 3\)')
+    assert list(b.keys()) == ['params_examples.track_param_selection']
+    assert b._benchmark_selection['params_examples.track_param_selection'] == [0, 2]
+    b = benchmarks.Benchmarks.discover(conf, repo, envs, [commit_hash],
+                                       regex='track_param_selection\(1, ')
+    assert list(b.keys()) == ['params_examples.track_param_selection']
+    assert b._benchmark_selection['params_examples.track_param_selection'] == [0, 1]
+    b = benchmarks.Benchmarks.discover(conf, repo, envs, [commit_hash],
+                                       regex='track_param_selection')
+    assert list(b.keys()) == ['params_examples.track_param_selection']
+    assert b._benchmark_selection['params_examples.track_param_selection'] == [0, 1, 2, 3]
+
     b = benchmarks.Benchmarks.discover(conf, repo, envs, [commit_hash])
-    assert len(b) == 35
+    assert len(b) == 36
 
     assert 'named.OtherSuite.track_some_func' in b
 
@@ -100,7 +114,7 @@ def test_find_benchmarks(tmpdir):
         'time_examples.TimeSuite.time_example_benchmark_1']['result'] != [None]
     assert isinstance(times['time_examples.TimeSuite.time_example_benchmark_1']['stats'][0]['std'], float)
     # The exact number of samples may vary if the calibration is not fully accurate
-    assert len(times['time_examples.TimeSuite.time_example_benchmark_1']['samples'][0]) in (8, 9, 10)
+    assert len(times['time_examples.TimeSuite.time_example_benchmark_1']['samples'][0]) >= 5
     # Benchmarks that raise exceptions should have a time of "None"
     assert times[
         'time_secondary.TimeSecondary.time_exception']['result'] == [None]
