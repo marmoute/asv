@@ -135,9 +135,9 @@ class Hg(Repo):
         rev = self._repo.log(self._encode(hash))[0]
         return int(rev.date.strftime("%s")) * 1000
 
-    def get_hashes_from_range(self, range_spec):
+    def get_hashes_from_range(self, range_spec, **kwargs):
         range_spec = self._encode("sort({0}, -rev)".format(range_spec))
-        return [self._decode(rev.node) for rev in self._repo.log(range_spec)]
+        return [self._decode(rev.node) for rev in self._repo.log(range_spec, **kwargs)]
 
     def get_hash_from_name(self, name):
         if name is None:
