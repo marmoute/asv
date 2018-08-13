@@ -507,13 +507,14 @@ class TimeBenchmark(Benchmark):
                 # stop taking samples if limits exceeded
                 if timeit_count < min_timeit_count:
                     return False
-                if default_number:
+                elif default_number:
                     t = 1.3*sample_time
-                    max_time = start_time + min(warmup_time + repeat * t,
-                                                self.timeout - t)
+                    expected = repeat * t
+                    max_runtime = min(warmup_time + expected, self.timeout - t)
                 else:
-                    max_time = start_time + self.timeout - 2*timing
-                return time.time() > max_time
+                    max_runtime = self.timeout - 2*timing
+                deadline = start_time + max_runtime
+                return time.time() > deadline
         else:
             # take exactly the number of samples requested
             def too_slow(timing):
