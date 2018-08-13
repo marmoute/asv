@@ -451,6 +451,7 @@ class TimeBenchmark(Benchmark):
 
     def _load_vars(self):
         self.repeat = _get_first_attr(self._attr_sources, 'repeat', 0)
+        self.min_repeat = _get_first_attr(self._attr_sources, 'min_repeat', 2)
         self.number = int(_get_first_attr(self._attr_sources, 'number', 0))
         self.sample_time = _get_first_attr(self._attr_sources, 'sample_time', 0.1)
         self.warmup_time = _get_first_attr(self._attr_sources, 'warmup_time', -1)
@@ -483,7 +484,8 @@ class TimeBenchmark(Benchmark):
             timer=self.timer)
 
         samples, number = self.benchmark_timing(timer, self.repeat, warmup_time,
-                                                number=self.number)
+                                                number=self.number,
+                                                min_timeit_count=self.min_repeat)
 
         samples = [s/number for s in samples]
         return {'samples': samples, 'number': number}
