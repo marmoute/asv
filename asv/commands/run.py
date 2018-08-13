@@ -105,9 +105,7 @@ class Run(Command):
             "--skip-existing", "-k", action="store_true",
             help="""Skip running benchmarks that have previous successful
             or failed results""")
-        parser.add_argument(
-            "--record-samples", action="store_true",
-            help="""Store raw measurement samples, not only statistics""")
+        common_args.add_record_samples(parser)
         parser.add_argument(
             "--no-pull", action="store_true",
             help="Do not pull the repository")
@@ -120,24 +118,24 @@ class Run(Command):
     def run_from_conf_args(cls, conf, args, **kwargs):
         return cls.run(
             conf=conf, range_spec=args.range, steps=args.steps,
-            bench=args.bench, parallel=args.parallel,
+            bench=args.bench, attribute=args.attribute, parallel=args.parallel,
             show_stderr=args.show_stderr, quick=args.quick,
             profile=args.profile, env_spec=args.env_spec,
             dry_run=args.dry_run, machine=args.machine,
             skip_successful=args.skip_existing_successful or args.skip_existing,
             skip_failed=args.skip_existing_failed or args.skip_existing,
             skip_existing_commits=args.skip_existing_commits,
-            record_samples=args.record_samples,
+            record_samples=args.record_samples, append_samples=args.append_samples,
             pull=not args.no_pull,
             **kwargs
         )
 
     @classmethod
-    def run(cls, conf, range_spec=None, steps=None, bench=None, parallel=1,
+    def run(cls, conf, range_spec=None, steps=None, bench=None, attribute=None, parallel=1,
             show_stderr=False, quick=False, profile=False, env_spec=None,
             dry_run=False, machine=None, _machine_file=None, skip_successful=False,
             skip_failed=False, skip_existing_commits=False, record_samples=False,
-            pull=True, _returns={}):
+            append_samples=False, pull=True, _returns={}):
         machine_params = Machine.load(
             machine_name=machine,
             _path=_machine_file, interactive=True)
@@ -192,19 +190,20 @@ class Run(Command):
                                          commit_hashes, regex=bench)
         benchmarks.save()
         if len(benchmarks) == 0:
-            log.error("No benchmarks selected")
             if bench == ["just-discover"]:
                 return 0
             else:
+                log.error("No benchmarks selected")
                 return 1
 
-        steps = len(commit_hashes) * len(benchmarks) * len(environments)
+        benchmark_count = len(benchmarks)
+        steps = len(commit_hashes) * benchmark_count * len(environments)
 
         log.info(
             "Running {0} total benchmarks "
             "({1} commits * {2} environments * {3} benchmarks)".format(
                 steps, len(commit_hashes),
-                len(environments), len(benchmarks)), "green")
+                len(environments), len(benchmarks)))
         log.set_nitems(steps)
 
         parallel, multiprocessing = util.get_multiprocessing(parallel)
@@ -215,8 +214,9 @@ class Run(Command):
 
         for commit_hash in commit_hashes:
             skipped_benchmarks = defaultdict(lambda: set())
+            all_prev_samples = defaultdict(lambda: dict())
 
-            if skip_successful or skip_failed or skip_existing_commits:
+            if skip_successful or skip_failed or skip_existing_commits or append_samples:
                 try:
                     for result in iter_results_for_machine_and_hash(
                             conf.results_dir, machine_params.machine, commit_hash):
@@ -232,6 +232,14 @@ class Run(Command):
                             value = result.get_result_value(key, benchmarks[key]['params'])
 
                             failed = value is None or (isinstance(value, list) and None in value)
+
+                            if append_samples:
+                                samples = result.get_result_samples(key, benchmarks[key]['params'])
+                                stats = result.get_result_stats(key, benchmarks[key]['params'])
+                                if samples is not None and stats is not None:
+                                    numbers = [None if stat is None else stat.get('number', None)
+                                               for stat in stats]
+                                    all_prev_samples[result.env_name][key] = list(zip(samples, numbers))
 
                             if skip_failed and failed:
                                 skipped_benchmarks[result.env_name].add(key)
@@ -286,12 +294,16 @@ class Run(Command):
                         params['python'] = env.python
                         params.update(env.requirements)
 
+                        benchmark_set = benchmarks.filter_out(skipped_benchmarks[env.name])
+                        prev_samples = all_prev_samples.get(env.name)
+
                         if success:
-                            results = benchmarks.run_benchmarks(
+                            results = benchmark_set.run_benchmarks(
                                 env, show_stderr=show_stderr, quick=quick,
-                                profile=profile, skip=skipped_benchmarks[env.name])
+                                profile=profile, extra_params=attribute,
+                                prev_samples=prev_samples)
                         else:
-                            results = benchmarks.skip_benchmarks(env)
+                            results = benchmark_set.skip_benchmarks(env)
 
                         if dry_run or isinstance(env, environment.ExistingEnvironment):
                             continue
@@ -305,11 +317,8 @@ class Run(Command):
                             env.name)
 
                         for benchmark_name, d in six.iteritems(results):
-                            if not record_samples:
-                                d['samples'] = None
-                                d['number'] = None
-
                             benchmark_version = benchmarks[benchmark_name]['version']
-                            result.add_result(benchmark_name, d, benchmark_version)
+                            result.add_result(benchmark_name, d, benchmark_version,
+                                              record_samples=record_samples or append_samples)
 
                         result.update_save(conf.results_dir)

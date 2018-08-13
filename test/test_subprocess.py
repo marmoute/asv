@@ -7,10 +7,12 @@ from __future__ import (absolute_import, division, print_function,
 import os
 import sys
 import time
+import pytest
 
 from asv import util
 
 
+@pytest.mark.flaky(reruns=3, reruns_delay=5)
 def test_timeout():
     timeout_codes = []
     timeout_codes.append(r"""
@@ -83,6 +85,7 @@ sys.exit(1)
         assert False, "Expected exception"
 
 
+@pytest.mark.flaky(reruns=3, reruns_delay=5)
 def test_output_timeout():
     # Check that timeout is determined based on last output, not based
     # on start time.
@@ -117,6 +120,31 @@ print(os.environ['TEST_ASV_BAR'])
     env['TEST_ASV_BAR'] = u'bar'
     output = util.check_output([sys.executable, "-c", code], env=env)
     assert output.splitlines() == ['foo', 'bar']
+
+
+def test_no_timeout():
+    # Check that timeout=None is allowed.
+    code = "import time; time.sleep(0.05)"
+    out, err, retcode = util.check_output([sys.executable, "-c", code], timeout=None,
+                                          return_stderr=True)
+    assert out == ''
+    assert err == ''
+    assert retcode == 0
+
+
+def test_stderr_redirect():
+    # Check redirecting stderr to stdout works
+    code = ("import sys;"
+            "sys.stdout.write('OUT\\n');"
+            "sys.stdout.flush();"
+            "sys.stderr.write('ERR\\n')")
+    out = util.check_output([sys.executable, "-c", code], redirect_stderr=True)
+    assert out.splitlines() == ['OUT', 'ERR']
+    out, err, retcode = util.check_output([sys.executable, "-c", code],
+                                          return_stderr=True, redirect_stderr=True)
+    assert out.splitlines() == ['OUT', 'ERR']
+    assert err == ''
+    assert retcode == 0
 
 
 # This *does* seem to work, only seems untestable somehow...

@@ -4,11 +4,12 @@
 from __future__ import (absolute_import, division, print_function,
                         unicode_literals)
 
+import sys
 import base64
 import os
 import zlib
 import itertools
-import datetime
+import hashlib
 
 import six
 from six.moves import zip as izip
@@ -146,7 +147,12 @@ def get_filename(machine, commit_hash, env_name):
     """
     Get the result filename for a given machine, commit_hash and
     environment.
+
+    If the environment name is too long, use its hash instead.
     """
+    if env_name and len(env_name) >= 128:
+        env_name = "env-" + hashlib.md5(env_name.encode('utf-8')).hexdigest()
+
     return os.path.join(
         machine,
         "{0}-{1}.json".format(
@@ -213,7 +219,6 @@ class Results(object):
         self._date = date
         self._results = {}
         self._samples = {}
-        self._number = {}
         self._stats = {}
         self._benchmark_params = {}
         self._profiles = {}
@@ -345,17 +350,11 @@ class Results(object):
         samples : {None, list}
             Raw result samples. If the benchmark is parameterized,
             return a list of values.
-        number : int
-            Associated repeat count
 
         """
-        samples = _compatible_results(self._samples[key],
-                                      self._benchmark_params[key],
-                                      params)
-        number = _compatible_results(self._number[key],
-                                     self._benchmark_params[key],
-                                     params)
-        return samples, number
+        return _compatible_results(self._samples[key],
+                                   self._benchmark_params[key],
+                                   params)
 
     def get_result_params(self, key):
         """
@@ -370,7 +369,6 @@ class Results(object):
         del self._results[key]
         del self._benchmark_params[key]
         del self._samples[key]
-        del self._number[key]
         del self._stats[key]
 
         # Remove profiles (may be missing)
@@ -383,7 +381,8 @@ class Results(object):
         # Remove version (may be missing)
         self._benchmark_version.pop(key, None)
 
-    def add_result(self, benchmark_name, result, benchmark_version):
+    def add_result(self, benchmark_name, result, benchmark_version,
+                   record_samples=False):
         """
         Add benchmark result.
 
@@ -392,29 +391,46 @@ class Results(object):
         benchmark_name : str
             Name of benchmark
 
-        result : dict
-            Result of the benchmark, as returned by `benchmarks.run_benchmark`.
+        result : runner.BenchmarkResult
+            Result of the benchmark.
 
         """
-        self._results[benchmark_name] = result['result']
-        self._samples[benchmark_name] = result['samples']
-        self._number[benchmark_name] = result['number']
-        self._stats[benchmark_name] = result['stats']
-        self._benchmark_params[benchmark_name] = result['params']
-        self._started_at[benchmark_name] = util.datetime_to_js_timestamp(result['started_at'])
-        self._ended_at[benchmark_name] = util.datetime_to_js_timestamp(result['ended_at'])
+        self._results[benchmark_name] = result.result
+        if record_samples:
+            self._samples[benchmark_name] = result.samples
+        else:
+            self._samples[benchmark_name] = None
+        self._stats[benchmark_name] = result.stats
+        self._benchmark_params[benchmark_name] = result.params
+        self._started_at[benchmark_name] = util.datetime_to_js_timestamp(result.started_at)
+        self._ended_at[benchmark_name] = util.datetime_to_js_timestamp(result.ended_at)
         self._benchmark_version[benchmark_name] = benchmark_version
 
-        if 'profile' in result and result['profile']:
-            self._profiles[benchmark_name] = base64.b64encode(
-                zlib.compress(result['profile']))
+        if result.profile:
+            profile_data = base64.b64encode(zlib.compress(result.profile))
+            if sys.version_info[0] >= 3:
+                profile_data = profile_data.decode('ascii')
+            self._profiles[benchmark_name] = profile_data
 
     def get_profile(self, benchmark_name):
         """
         Get the profile data for the given benchmark name.
+
+        Parameters
+        ----------
+        benchmark_name : str
+            Name of benchmark
+
+        Returns
+        -------
+        profile_data : bytes
+            Raw profile data
+
         """
-        return zlib.decompress(
-            base64.b64decode(self._profiles[benchmark_name]))
+        profile_data = self._profiles[benchmark_name]
+        if sys.version_info[0] >= 3:
+            profile_data = profile_data.encode('ascii')
+        return zlib.decompress(base64.b64decode(profile_data))
 
     def has_profile(self, benchmark_name):
         """
@@ -439,8 +455,6 @@ class Results(object):
             value = {'result': self._results[key]}
             if self._samples[key] and any(x is not None for x in self._samples[key]):
                 value['samples'] = self._samples[key]
-            if self._number[key] and any(x is not None for x in self._number[key]):
-                value['number'] = self._number[key]
             if self._stats[key] and any(x is not None for x in self._stats[key]):
                 value['stats'] = self._stats[key]
             if self._benchmark_params[key]:
@@ -512,14 +526,13 @@ class Results(object):
 
             obj._results = {}
             obj._samples = {}
-            obj._number = {}
             obj._stats = {}
             obj._benchmark_params = {}
 
             for key, value in six.iteritems(d['results']):
                 # Backward compatibility
                 if not isinstance(value, dict):
-                    value = {'result': [value], 'samples': None, 'number': None,
+                    value = {'result': [value], 'samples': None,
                              'stats': None, 'params': []}
 
                 if not isinstance(value['result'], list):
@@ -529,14 +542,12 @@ class Results(object):
                     value['stats'] = [value['stats']]
 
                 value.setdefault('samples', None)
-                value.setdefault('number', None)
                 value.setdefault('stats', None)
                 value.setdefault('params', [])
 
                 # Assign results
                 obj._results[key] = value['result']
                 obj._samples[key] = value['samples']
-                obj._number[key] = value['number']
                 obj._stats[key] = value['stats']
                 obj._benchmark_params[key] = value['params']
 
@@ -564,7 +575,7 @@ class Results(object):
         Add any existing old results that aren't overridden by the
         current results.
         """
-        for dict_name in ('_samples', '_number', '_stats',
+        for dict_name in ('_samples', '_stats',
                           '_benchmark_params', '_profiles', '_started_at',
                           '_ended_at', '_benchmark_version'):
             old_dict = getattr(old, dict_name)
@@ -596,7 +607,7 @@ class Results(object):
 
     @classmethod
     def update(cls, path):
-        util.update_json(cls, path, cls.api_version)
+        util.update_json(cls, path, cls.api_version, cleanup=False)
 
     @property
     def env_name(self):

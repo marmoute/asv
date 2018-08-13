@@ -11,7 +11,7 @@ from os.path import join
 
 import six
 
-from asv import results, util
+from asv import results, runner, util
 import pytest
 
 
@@ -34,21 +34,25 @@ def test_results(tmpdir):
 
         values = {
             'suite1.benchmark1': {'result': [float(i * 0.001)], 'stats': [{'foo': 1}],
-                                  'samples': [[1,2]], 'number': [6], 'params': [['a']],
-                                  'version': "1"},
+                                  'samples': [[1,2]], 'params': [['a']],
+                                  'version': "1", 'profile': b'\x00\xff'},
             'suite1.benchmark2': {'result': [float(i * i * 0.001)], 'stats': [{'foo': 2}],
-                                  'samples': [[3,4]], 'number': [7], 'params': [],
-                                  'version': "1"},
+                                  'samples': [[3,4]], 'params': [],
+                                  'version': "1", 'profile': b'\x00\xff'},
             'suite2.benchmark1': {'result': [float((i + 1) ** -1)], 'stats': [{'foo': 3}],
-                                  'samples': [[5,6]], 'number': [8], 'params': [['c']],
-                                  'version': None}
+                                  'samples': [[5,6]], 'params': [['c']],
+                                  'version': None, 'profile': b'\x00\xff'}
         }
 
         for key, val in values.items():
             val = dict(val)
-            val['started_at'] = timestamp1
-            val['ended_at'] = timestamp2
-            r.add_result(key, val, val.pop("version"))
+            version = val.pop('version')
+            val = runner.BenchmarkResult(started_at=timestamp1,
+                                         ended_at=timestamp2,
+                                         errcode=0,
+                                         stderr='',
+                                         **val)
+            r.add_result(key, val, version, record_samples=True)
 
         # Save / add_existing_results roundtrip
         r.save(resultsdir)
@@ -64,8 +68,8 @@ def test_results(tmpdir):
         for rr in [r2, r3]:
             assert rr._results == r._results
             assert rr._stats == r._stats
-            assert rr._number == r._number
             assert rr._samples == r._samples
+            assert rr._profiles == r._profiles
             assert rr.started_at == r._started_at
             assert rr.ended_at == r._ended_at
             assert rr.benchmark_version == r._benchmark_version
@@ -78,14 +82,16 @@ def test_results(tmpdir):
             assert params == values[bench]['params']
             assert r2.get_result_value(bench, params) == values[bench]['result']
             assert r2.get_result_stats(bench, params) == values[bench]['stats']
-            assert r2.get_result_samples(bench, params) == (values[bench]['samples'],
-                                                            values[bench]['number'])
+            assert r2.get_result_samples(bench, params) == values[bench]['samples']
 
             # Get with different parameters than stored (should return n/a)
             bad_params = [['foo', 'bar']]
             assert r2.get_result_value(bench, bad_params) == [None, None]
             assert r2.get_result_stats(bench, bad_params) == [None, None]
-            assert r2.get_result_samples(bench, bad_params) == ([None, None], [None, None])
+            assert r2.get_result_samples(bench, bad_params) == [None, None]
+
+            # Get profile
+            assert r2.get_profile(bench) == b'\x00\xff'
 
         # Check get_result_keys
         mock_benchmarks = {
@@ -141,15 +147,17 @@ def test_json_timestamp(tmpdir):
 
     r = results.Results({'machine': 'mach'}, {}, 'aaaa', util.datetime_to_timestamp(stamp0),
                         'py', 'env')
-    value = {
-        'result': [42],
-        'params': [],
-        'stats': None,
-        'samples': None,
-        'number': None,
-        'started_at': stamp1,
-        'ended_at': stamp2
-    }
+    value = runner.BenchmarkResult(
+        result=[42],
+        params=[],
+        stats=None,
+        samples=None,
+        started_at=stamp1,
+        ended_at=stamp2,
+        profile=None,
+        errcode=0,
+        stderr=''
+    )
     r.add_result('some_benchmark', value, "some version")
     r.save(tmpdir)
 
@@ -187,3 +195,11 @@ def test_iter_results(capsys, tmpdir):
     assert len(res) == 0
     out, err = capsys.readouterr()
     assert "machine.json" in out
+
+
+def test_filename_format():
+    r = results.Results({'machine': 'foo'}, [], "commit", 0, "", "env")
+    assert r._filename == join("foo", "commit-env.json")
+
+    r = results.Results({'machine': 'foo'}, [], "hash", 0, "", "a"*128)
+    assert r._filename == join("foo", "hash-env-e510683b3f5ffe4093d021808bc6ff70.json")
