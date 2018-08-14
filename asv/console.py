@@ -11,6 +11,7 @@ from __future__ import (absolute_import, division, print_function,
 import io
 import codecs
 import contextlib
+import datetime
 import locale
 import logging
 import os
@@ -273,6 +274,11 @@ class Log(object):
             rest = None
         else:
             rest = parts[1]
+
+        now = datetime.datetime.now()
+        time_str = now.replace(microsecond=0).isoformat()
+        color_print(time_str, end='')
+        color_print(' ', end='')
 
         if self._total:
             color_print('[{0:6.02f}%] '.format(
