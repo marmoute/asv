@@ -638,10 +638,20 @@ def run_benchmark_single(benchmark, benchmark_dir, env, param_idx, profile, extr
     else:
         real_cwd = cwd
 
+
+    if benchmark['params']:
+        all_params = list(itertools.product(*benchmark['params']))
+        variant_params = all_params[param_idx]
+        variant_str = ", ".join(variant_params)
+
     result_file = tempfile.NamedTemporaryFile(delete=False)
     try:
         result_file.close()
 
+        if benchmark['params']:
+            msg = 'Benchmark variant #{0}/{1} ({2!r})'
+
+            log.info(msg.format(param_idx, len(all_params), variant_str))
         out, _, errcode = env.run(
             [BENCHMARK_RUN_SCRIPT, 'run', os.path.abspath(benchmark_dir),
              name, params_str, profile_path, result_file.name],
@@ -680,7 +690,7 @@ def run_benchmark_single(benchmark, benchmark_dir, env, param_idx, profile, extr
         if benchmark['params'] and out:
             params, = itertools.islice(itertools.product(*benchmark['params']),
                                        param_idx, param_idx + 1)
-            out = "For parameters: {0}\n{1}".format(", ".join(params), out)
+            out = "For parameters: {0}\n{1}".format(variant_str, out)
 
         if profile:
             with io.open(profile_path, 'rb') as profile_fd:
